@@ -3,17 +3,36 @@ kind: StatefulSet
 metadata:
   namespace: mysql-cluster
   name: mysql-rw-sts
-spec: 
-  selector: 
-    matchLabels: 
+spec:
+  selector:
+    matchLabels:
       app: mysql-rw-sts
   serviceName: mysql-rw-svc
   replicas: 3
-  template: 
+
+  volumeClaimTemplates:
+  - metadata:
+      name: persistent
+    spec:
+      storageClassName: hm77-nfs-client
+      accessModes:
+        - ReadWriteMany
+      resources:
+        requests:
+          storage: 30Gi
+
+  template:
     metadata:
       labels:
         app: mysql-rw-sts
     spec:
+      volumes:
+      - name: conf
+        emptyDir: {}
+      - name: config-map
+        configMap:
+          name: mysql-rw-cm
+      
       initContainers:
       - name: init-mysql
         image: mysql:8.0
@@ -21,89 +40,83 @@ spec:
         - bash
         - "-c"
         - |
-          set ex
-          # Generate mysql server-id from pod ordinal index.
-          [[ `hostname` =~ -([0-9]+)$ ]] || exit 1
+          set -ex
+          # 基于 Pod 序号生成 MySQL 服务器的 ID。
+          [[ $HOSTNAME =~ -([0-9]+)$ ]] || exit 1
           ordinal=${BASH_REMATCH[1]}
           echo [mysqld] > /mnt/conf.d/server-id.cnf
-
-          # Add an offset to avoid reserved server-id=0 value.
+          # 添加偏移量以避免使用 server-id=0 这一保留值。
           echo server-id=$((100 + $ordinal)) >> /mnt/conf.d/server-id.cnf
-
-          # Copy appropriate conf.d files from config-map to emptyDir.
+          # 将合适的 conf.d 文件从 config-map 复制到 emptyDir。
           if [[ $ordinal -eq 0 ]]; then
-            cp /mnt/config-map/master.cnf /mnt/conf.d/
+            cp /mnt/config-map/primary.cnf /mnt/conf.d/
           else
-            cp /mnt/config-map/slave.cnf /mnt/conf.d/
-          fi
+            cp /mnt/config-map/replica.cnf /mnt/conf.d/
+          fi          
         volumeMounts:
         - name: conf
           mountPath: /mnt/conf.d
         - name: config-map
           mountPath: /mnt/config-map
       - name: clone-mysql
-        image: mzmuer/xtrabackup:1.0
+        image: gcr.io/google-samples/xtrabackup:1.0
         command:
         - bash
         - "-c"
         - |
           set -ex
-          # Skip the clone if data already exists.
+          # 如果已有数据，则跳过克隆。
           [[ -d /var/lib/mysql/mysql ]] && exit 0
-
-          # Skip the clone on master (ordinal index 0).
+          # 跳过主实例（序号索引 0）的克隆。
           [[ `hostname` =~ -([0-9]+)$ ]] || exit 1
           ordinal=${BASH_REMATCH[1]}
           [[ $ordinal -eq 0 ]] && exit 0
-
-          # Clone data from previous peer.
-          ncat --recv-only mysql-ss-$(($ordinal-1)).mysql-svc-master 3307 | xbstream -x -C /var/lib/mysql
-          # Prepare the backup.
-          xtrabackup --prepare --target-dir=/var/lib/mysql
+          # 从原来的对等节点克隆数据。
+          ncat --recv-only mysql-rw-sts-$(($ordinal-1)).mysql-rw-svc 3307 | xbstream -x -C /var/lib/mysql
+          # 准备备份。
+          xtrabackup --prepare --target-dir=/var/lib/mysql          
         volumeMounts:
-        - name: data
+        - name: persistent
           mountPath: /var/lib/mysql
           subPath: mysql
         - name: conf
           mountPath: /etc/mysql/conf.d
+
       containers:
       - name: mysql
         image: mysql:8.0
         args: ["--default-authentication-plugin=mysql_native_password"]
         env:
-        - name: MYSQL_ALLOW_EMPTY_PASSWORD
-          value: "1"
+        - name: MYSQL_ROOT_PASSWORD
+          value: "rootpasswd"
         ports:
         - name: mysql
           containerPort: 3306
         volumeMounts:
-        - name: data
+        - name: persistent
           mountPath: /var/lib/mysql
           subPath: mysql
         - name: conf
           mountPath: /etc/mysql/conf.d
-        resources:
-          requests:
-            cpu: 250m
-            memory: 256Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
-        livenessProbe:
-          exec:
-            command: ["mysqladmin", "ping"]
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-        readinessProbe:
-          exec:
-            # Check we can execute queries over TCP (skip-networking is off).
-            command: ["mysql", "-h", "127.0.0.1", "-e", "SELECT 1"]
-          initialDelaySeconds: 5
-          periodSeconds: 2
-          timeoutSeconds: 1
+        # resources:
+        #   requests:
+        #     cpu: 500m
+        #     memory: 1Gi
+        # livenessProbe:
+        #   exec:
+        #     command: ["mysqladmin", "ping"]
+        #   initialDelaySeconds: 30
+        #   periodSeconds: 10
+        #   timeoutSeconds: 5
+        # readinessProbe:
+        #   exec:
+        #     # 检查我们是否可以通过 TCP 执行查询（skip-networking 是关闭的）。
+        #     command: ["mysql", "-h", "127.0.0.1", "-e", "SELECT 1"]
+        #   initialDelaySeconds: 5
+        #   periodSeconds: 2
+        #   timeoutSeconds: 1
       - name: xtrabackup
-        image: mzmuer/xtrabackup:1.0
+        image: gcr.io/google-samples/xtrabackup:1.0
         ports:
         - name: xtrabackup
           containerPort: 3307
@@ -140,43 +153,24 @@ spec:
             mv change_master_to.sql.in change_master_to.sql.orig
             mysql -h 127.0.0.1 <<EOF
           $(<change_master_to.sql.orig),
-            MASTER_HOST='mysql-ss-0.mysql-svc-master',
+            MASTER_HOST='mysql-rw-sts-0.mysql-rw-svc',
             MASTER_USER='root',
-            MASTER_PASSWORD='',
+            MASTER_PASSWORD='rootpasswd',
             MASTER_CONNECT_RETRY=10;
           START SLAVE;
           EOF
           fi
 
-          # Start a server to send backups when requested by peers.
+          # 当对等点请求时，启动服务器发送备份。
           exec ncat --listen --keep-open --send-only --max-conns=1 3307 -c \
-            "xtrabackup --backup --slave-info --stream=xbstream --host=127.0.0.1 --user=root"
+            "xtrabackup --backup --slave-info --stream=xbstream --host=127.0.0.1 --user=root --password=rootpasswd"          
         volumeMounts:
-        - name: data
+        - name: persistent
           mountPath: /var/lib/mysql
           subPath: mysql
         - name: conf
           mountPath: /etc/mysql/conf.d
-        resources:
-          requests:
-            cpu: 100m
-            memory: 100Mi
-          limits: 
-            cpu: 200m
-            memory: 200Mi
-      volumes:
-      - name: conf
-        emptyDir: {}
-      - name: config-map
-        configMap:
-          name: mysql
-  volumeClaimTemplates:
-  - metadata:
-      name: mysql-rw-persistent
-    spec:
-      storageClassName: hm77-nfs-client
-      accessModes:
-        - ReadWriteMany
-      resources:
-        requests:
-          storage: 30Gi
+        # resources:
+        #   requests:
+        #     cpu: 100m
+        #     memory: 100Mi
