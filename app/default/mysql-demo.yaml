@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-demo-cm
+data:
+  ROOT_PASSWORD: 'root'
+---
+
+#apiVersion: v1
+#kind: Secret
+#metadata:
+#  name: mysql-demo-cs
+#data:
+#  name: cm9vdA==  # root
+#  pwd: MTIzNDU2   # 123456
+#  db: bXlzcWw=    # mysql
+#---
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-demo-pv
+
+spec:
+  storageClassName: hm77-nfs
+  accessModes:
+    - ReadWriteMany
+  capacity:
+    storage: 8Gi
+
+  nfs:
+    path: /mnt/data/k8s/default/mysql-demo
+    server: truenas-hm77.home
+---
+
+#apiVersion: v1
+#kind: PersistentVolumeClaim
+#metadata:
+#  name: mysql-demo-pvc
+#
+#spec:
+#  storageClassName: hm77-nfs
+#  accessModes:
+#    - ReadWriteMany
+#  resources:
+#    requests:
+#      storage: 8Gi
+#---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-demo-sts
+
+spec:
+  serviceName: mysql-demo-svc
+  replicas: 1
+
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-demo-persistent
+    spec:
+      storageClassName: hm77-nfs
+      accessModes:
+        - ReadWriteMany
+      resources:
+        requests:
+          storage: 8Gi
+
+  selector:
+    matchLabels:
+      app: mysql-demo
+
+  template:
+    metadata:
+      labels:
+        app: mysql-demo
+    spec:
+      containers:
+      - image: mysql
+        name: mysql-demo
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3306
+
+        envFrom:
+        - prefix: 'MYSQL_'
+          configMapRef:
+            name: mysql-demo-cm
+
+        volumeMounts:
+        - name: mysql-demo-persistent
+          mountPath: /var/lib/mysql

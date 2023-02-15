@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: mysql-cluster
+  name: mysql-rw-cm
+  labels:
+    app: mysql-rw-cm
+data:
+  master.cnf: |
+    # Apply this config only on the master.
+    [client]
+    default-character-set=utf8mb4
+
+    [mysql]
+    default-character-set=utf8mb4
+
+    [mysqld]
+    # 打开binlog日志
+    log-bin
+    binlog_expire_logs_seconds=2592000
+    max_connections=10000
+    # 在容器里面需要设置下时区
+    default-time-zone='+8:00'
+    character-set-client-handshake=FALSE
+    character-set-server=utf8mb4
+    collation-server=utf8mb4_unicode_ci
+    init_connect='SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci'
+  slave.cnf: |
+    # Apply this config only on slaves.
+    [client]
+    default-character-set=utf8mb4
+
+    [mysql]
+    default-character-set=utf8mb4
+
+    [mysqld]
+    # 机器设置只读
+    super-read-only
+    max_connections=10000
+    default-time-zone='+8:00'
+    character-set-client-handshake=FALSE
+    character-set-server=utf8mb4
+    collation-server=utf8mb4_unicode_ci
+    init_connect='SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci'

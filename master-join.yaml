@@ -1,0 +1,21 @@
+# 所有节点添加的配置
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+
+---
+# master join
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    token: 605lz0*******************************
+    apiServerEndpoint: master.k8s.vip.home:6443
+    caCertHashes:
+    - sha256:8479343****************************************************
+controlPlane:
+  certificateKey: 056ed5**********************************************
+#  localAPIEndpoint:
+#    advertiseAddress: master2.k8s.test.home
+#    bindPort: 6443
+

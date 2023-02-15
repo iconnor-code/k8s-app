@@ -1,0 +1,24 @@
+# 第一个master init
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+#localAPIEndpoint:
+  #advertiseAddress: 192.168.32.204
+  #bindPort: 6443
+nodeRegistration:
+  criSocket: unix:///var/run/containerd/containerd.sock
+  #criSocket: unix:///var/run/cri-dockerd.sock
+
+---
+# 会自动应用到全局
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: v1.26.0
+controlPlaneEndpoint: master.k8s.vip.home
+imageRepository: registry.aliyuncs.com/google_containers
+
+
+---
+# 所有节点添加的配置
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
