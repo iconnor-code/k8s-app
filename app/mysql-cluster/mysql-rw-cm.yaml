@@ -15,6 +15,11 @@ data:
     default-character-set=utf8mb4
 
     [mysqld]
+    datadir=/var/lib/mysql
+    bind-address=0.0.0.0
+    gtid_mode=on    # 开启GTID
+    enforce-gtid-consistency=on  # 需要同步设置该参数
+    log-slave-updates=1      # 5.6 版本需要开启该参数
     # 打开binlog日志
     log-bin
     binlog_expire_logs_seconds=2592000
@@ -34,6 +39,11 @@ data:
     default-character-set=utf8mb4
 
     [mysqld]
+    datadir=/var/lib/mysql
+    bind-address=0.0.0.0
+    gtid_mode=on    # 开启GTID
+    enforce-gtid-consistency=on  # 需要同步设置该参数
+    log-slave-updates=1      # 5.6 版本需要开启该参数
     # 机器设置只读
     super-read-only
     max_connections=10000

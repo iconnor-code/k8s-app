@@ -35,7 +35,7 @@ spec:
       
       initContainers:
       - name: init-mysql
-        image: mysql:8.0
+        image: mysql:8.0.18
         command:
         - bash
         - "-c"
@@ -59,7 +59,7 @@ spec:
         - name: config-map
           mountPath: /mnt/config-map
       - name: clone-mysql
-        image: gcr.io/google-samples/xtrabackup:1.0
+        image: mzmuer/xtrabackup:1.0
         command:
         - bash
         - "-c"
@@ -72,7 +72,7 @@ spec:
           ordinal=${BASH_REMATCH[1]}
           [[ $ordinal -eq 0 ]] && exit 0
           # 从原来的对等节点克隆数据。
-          ncat --recv-only mysql-rw-sts-$(($ordinal-1)).mysql-rw-svc 3307 | xbstream -x -C /var/lib/mysql
+          ncat --recv-only mysql-rw-sts-$(($ordinal-1)).mysql-rw-svc.mysql-cluster 3307 | xbstream -x -C /var/lib/mysql
           # 准备备份。
           xtrabackup --prepare --target-dir=/var/lib/mysql          
         volumeMounts:
@@ -84,7 +84,7 @@ spec:
 
       containers:
       - name: mysql
-        image: mysql:8.0
+        image: mysql:8.0.18
         args: ["--default-authentication-plugin=mysql_native_password"]
         env:
         - name: MYSQL_ROOT_PASSWORD
@@ -116,7 +116,7 @@ spec:
         #   periodSeconds: 2
         #   timeoutSeconds: 1
       - name: xtrabackup
-        image: gcr.io/google-samples/xtrabackup:1.0
+        image: mzmuer/xtrabackup:1.0
         ports:
         - name: xtrabackup
           containerPort: 3307
@@ -137,23 +137,22 @@ spec:
             rm -f xtrabackup_binlog_info
           elif [[ -f xtrabackup_binlog_info ]]; then
             # We're cloning directly from master. Parse binlog position.
-            [[ `cat xtrabackup_binlog_info` =~ ^(.*?)[[:space:]]+(.*?)$ ]] || exit 1
+            #[[ `cat xtrabackup_binlog_info` =~ ^(.*?)[[:space:]]+(.*?)$ ]] || exit 1
             rm xtrabackup_binlog_info
-            echo "CHANGE MASTER TO MASTER_LOG_FILE='${BASH_REMATCH[1]}',\
-                  MASTER_LOG_POS=${BASH_REMATCH[2]}" > change_master_to.sql.in
+            echo "CHANGE MASTER TO MASTER_AUTO_POSITION=1" > change_master_to.sql.in
           fi
 
           # Check if we need to complete a clone by starting replication.
           if [[ -f change_master_to.sql.in ]]; then
             echo "Waiting for mysqld to be ready (accepting connections)"
-            until mysql -h 127.0.0.1 -e "SELECT 1"; do sleep 1; done
+            until mysql -h 127.0.0.1 -prootpasswd -e "SELECT 1"; do sleep 1; done
 
             echo "Initializing replication from clone position"
             # In case of container restart, attempt this at-most-once.
             mv change_master_to.sql.in change_master_to.sql.orig
-            mysql -h 127.0.0.1 <<EOF
+            mysql -h 127.0.0.1 -prootpasswd <<EOF
           $(<change_master_to.sql.orig),
-            MASTER_HOST='mysql-rw-sts-0.mysql-rw-svc',
+            MASTER_HOST='mysql-rw-sts-0.mysql-rw-svc.mysql-cluster',
             MASTER_USER='root',
             MASTER_PASSWORD='rootpasswd',
             MASTER_CONNECT_RETRY=10;

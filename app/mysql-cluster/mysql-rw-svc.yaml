@@ -4,7 +4,7 @@ metadata:
   namespace: mysql-cluster
   name: mysql-rw-svc
 spec:
-  type: clusterIP
+  type: ClusterIP
   clusterIP: None
   ports:
   - name: mysql
