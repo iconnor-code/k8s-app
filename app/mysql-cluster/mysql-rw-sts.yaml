@@ -149,11 +149,12 @@ spec:
             MASTER_CONNECT_RETRY=10;
           START SLAVE;
           EOF
-          else
-            # 主节点，启动服务器发送备份。
-            exec ncat --listen --keep-open --send-only --max-conns=1 3307 -c \
-            "xtrabackup --backup --slave-info --stream=xbstream --host=127.0.0.1 --user=root --password=rootpasswd"          
           fi
+
+          # 启动服务器发送备份, 从服务器启动也没什么用，可以优化放到init容器
+          exec ncat --listen --keep-open --send-only --max-conns=1 3307 -c \
+            "xtrabackup --backup --slave-info --stream=xbstream --host=127.0.0.1 --user=root --password=rootpasswd"          
+      
         volumeMounts:
         - name: persistent
           mountPath: /var/lib/mysql
